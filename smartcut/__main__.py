@@ -1,7 +1,6 @@
 import argparse
 import av
 import contextlib
-import numpy as np
 from datetime import datetime
 from fractions import Fraction
 from smartcut.media_container import MediaContainer
@@ -25,6 +24,27 @@ def parse_time_segments(time_str):
         raise ValueError("You must provide an even number of time points for segments.")
     return list(zip(times[::2], times[1::2]))
 
+def frame_to_time(source, frame_str, end_frame = False):
+    frame_num = int(frame_str)
+    if frame_num == -1:
+        # Special case: frame "-1" means "the final frame of the video"
+        # (also intentionally not including the ` - source.start_time` offset, to further ensure the chosen time
+        #  is all the way at the end of the file)
+        return source.video_frame_times[len(source.video_frame_times) - 1]
+    if end_frame:
+        # Internal calculations in `smart_cut` function currently *exclude* the final frame if it lands
+        # exactly on the specified end time, so we manually offset "end" frames by 1
+        frame_num += 1
+    return source.video_frame_times[frame_num] - source.start_time
+
+def parse_frame_segments(source, frame_str):
+    all_frames = frame_str.split(',')
+    if len(all_frames) % 2 != 0:
+        raise ValueError("You must provide an even number of frames for segments.")
+    start_frames = list(map(lambda f: frame_to_time(source, f), all_frames[::2]))
+    end_frames = list(map(lambda f: frame_to_time(source, f, True), all_frames[1::2]))
+    return list(zip(start_frames, end_frames))
+
 class Progress:
     def __init__(self):
         self.first_call = True
@@ -43,6 +63,7 @@ def main():
     parser.add_argument('output', type=str, help="Output media file path")
     parser.add_argument('--keep', type=str, help="Comma-separated list of start,end times to keep in seconds")
     parser.add_argument('--cut', type=str, help="Comma-separated list of start,end times to cut in seconds")
+    parser.add_argument('--frames', action='store_true', help="Keep/Cut list is frame numbers, not times (frames are zero-indexed, and -1 means \"last frame of the video\")")
     parser.add_argument('--log-level', type=str, default='warning', help="Log level (default: warning)")
     parser.add_argument('--version', action='version', version='Smartcut 1.1.0')
 
@@ -54,9 +75,15 @@ def main():
     source = MediaContainer(args.input)
 
     if args.keep:
-        segments = parse_time_segments(args.keep)
+        if args.frames:
+            segments = parse_frame_segments(source, args.keep)
+        else:
+            segments = parse_time_segments(args.keep)
     elif args.cut:
-        cut_segments = parse_time_segments(args.cut)
+        if args.frames:
+            cut_segments = parse_frame_segments(source, args.cut)
+        else:
+            cut_segments = parse_time_segments(args.cut)
         segments = [(Fraction(0), source.duration())]
         for c_start, c_end in cut_segments:
             last_segment = segments.pop()

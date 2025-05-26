@@ -19,4 +19,9 @@ setup(
     ],
     python_requires=">=3.11",
     install_requires=required_packages,
+    entry_points={
+    'console_scripts': [
+        'smartcut=smartcut.__main__:main',
+    ],
+},
 )
